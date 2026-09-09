@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Garmin Analytics</title><link rel="stylesheet" href="/static/style.css">
+  <script src="https://cdn.plot.ly/plotly-3.3.1.min.js"></script>
+</head>
+<body>
+<header><div><p class="eyebrow">ANÁLISIS PERSONAL</p><h1>GARMIN ANALYTICS</h1></div><button id="sync">Sincronizar ahora</button></header>
+<main>
+  <section class="toolbar"><div id="ranges" role="group" aria-label="Periodo"><button data-days="7">7 días</button><button class="active" data-days="30">30 días</button><button data-days="90">90 días</button><button data-days="180">6 meses</button><button data-days="270">9 meses</button><button data-days="365">1 año</button><button data-days="3650">Todo</button></div><p id="sync-status">Cargando estado…</p></section>
+  <section id="cards" class="cards"></section>
+  <section class="charts"><article><h2>Actividad semanal</h2><div id="activity-chart"></div></article><article><h2>Pasos diarios</h2><div id="steps-chart"></div></article><article><h2>Rendimiento</h2><div id="performance-chart"></div></article><article><h2>Sueño y HRV</h2><div id="recovery-chart"></div></article></section>
+  <section class="table-section"><div class="heading"><h2>Entrenamientos</h2><select id="type"><option value="">Todos los tipos</option></select></div><div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Actividad</th><th>Tipo</th><th>Distancia</th><th>Duración</th><th>Ritmo</th><th>FC</th></tr></thead><tbody id="activities"></tbody></table></div></section>
+</main><template id="card"><article class="card"><p></p><strong></strong></article></template><script src="/static/dashboard.js"></script>
+</body></html>

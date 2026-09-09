@@ -1,0 +1,15 @@
+.git
+.github
+.venv
+.env*
+data/
+tokens/
+downloads/
+tests/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.db
+*.fit
+*.gpx
+*.tcx

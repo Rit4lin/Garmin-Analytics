@@ -1,0 +1,40 @@
+[project]
+name = "garmin-analytics"
+version = "0.1.0"
+description = "Panel personal persistente para analizar datos de Garmin Connect"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "alembic==1.19.2",
+  "APScheduler==3.11.3",
+  "fastapi==0.141.1",
+  "garminconnect==0.3.11",
+  "Jinja2==3.1.6",
+  "pydantic-settings==2.15.0",
+  "SQLAlchemy==2.0.52",
+  "uvicorn[standard]==0.52.4",
+]
+
+[dependency-groups]
+dev = [
+  "httpx>=0.28.1,<0.29",
+  "pytest==9.1.1",
+  "ruff==0.16.6",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+"alembic/versions/*.py" = ["E501"]
+
+[tool.uv]
+prerelease = "disallow"
