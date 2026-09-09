@@ -1,7 +1,7 @@
 from collections.abc import Generator
 
 from alembic.config import Config
-from sqlalchemy import event, inspect
+from sqlalchemy import event, inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -39,7 +39,12 @@ def init_database() -> None:
     tables = set(inspect(engine).get_table_names())
     # La primera versión publicada creaba tablas directamente y no tenía revisión.
     # Se marca como 0001 para que la migración incremental siguiente sea segura.
-    if "alembic_version" not in tables and {"sync_state", "activities"}.issubset(tables):
+    legacy_tables = {"sync_state", "activities"}.issubset(tables)
+    version = None
+    if "alembic_version" in tables:
+        with engine.connect() as connection:
+            version = connection.execute(text("SELECT version_num FROM alembic_version")).scalar()
+    if legacy_tables and version is None:
         command.stamp(config, "0001_initial")
     command.upgrade(config, "head")
 

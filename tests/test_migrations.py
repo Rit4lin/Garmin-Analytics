@@ -13,6 +13,7 @@ def test_existing_database_is_adopted_and_migrated(tmp_path, monkeypatch) -> Non
         connection.execute(
             text("CREATE TABLE sync_state (name VARCHAR(40) PRIMARY KEY, status VARCHAR(30))")
         )
+        connection.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
     monkeypatch.setattr(database, "engine", engine)
     monkeypatch.setattr(database, "get_settings", lambda: Settings(database_url=url))
     database.init_database()

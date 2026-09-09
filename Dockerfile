@@ -2,6 +2,7 @@ FROM python:3.13.15-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
 
@@ -16,4 +17,4 @@ COPY alembic.ini ./
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz', timeout=3)"
-CMD ["sh", "-c", "uv run --no-sync alembic upgrade head && exec uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port 8080"]
+CMD ["sh", "-c", "uv run --no-sync python -c 'from app.database import init_database; init_database()' && exec uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port 8080"]
