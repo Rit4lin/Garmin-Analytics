@@ -1,10 +1,9 @@
 import logging
 import threading
-import time
 from datetime import date, datetime, timedelta
 
-from garminconnect import GarminConnectTooManyRequestsError
-from sqlalchemy import func, select
+from garminconnect import GarminConnectConnectionError, GarminConnectTooManyRequestsError
+from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.database import SessionLocal
@@ -30,6 +29,11 @@ class SyncService:
     def status(self) -> dict[str, object]:
         with SessionLocal() as db:
             state = db.get(SyncState, "garmin") or SyncState(name="garmin")
+            cooldown_seconds = (
+                max(0, int((state.next_retry_at - datetime.now()).total_seconds()))
+                if state.next_retry_at
+                else 0
+            )
             return {
                 key: getattr(state, key)
                 for key in (
@@ -40,26 +44,24 @@ class SyncService:
                     "last_date_downloaded",
                     "error_message",
                     "next_retry_at",
+                    "backfill_status",
+                    "backfill_cursor_date",
                 )
-            }
+            } | {"cooldown_seconds": cooldown_seconds}
 
-    def request_sync(self, initial: bool = False, force: bool = False) -> bool:
-        """Inicia un único trabajo; los botones manuales pueden ignorar la espera."""
+    def request_sync(self) -> bool:
+        """Respeta siempre next_retry_at, también para peticiones manuales."""
         if not self._lock.acquire(blocking=False):
             return False
-        if not force:
-            with SessionLocal() as db:
-                state = db.get(SyncState, "garmin")
-                if state and state.next_retry_at and state.next_retry_at > datetime.now():
-                    self._lock.release()
-                    return False
-        thread = threading.Thread(
-            target=self._run, args=(initial,), daemon=True, name="garmin-sync"
-        )
-        thread.start()
+        with SessionLocal() as db:
+            state = db.get(SyncState, "garmin")
+            if state and state.next_retry_at and state.next_retry_at > datetime.now():
+                self._lock.release()
+                return False
+        threading.Thread(target=self._run, daemon=True, name="garmin-sync").start()
         return True
 
-    def _state(self, db):  # type: ignore[no-untyped-def]
+    def _state(self, db: Session) -> SyncState:
         state = db.get(SyncState, "garmin")
         if state is None:
             state = SyncState(name="garmin")
@@ -67,58 +69,82 @@ class SyncService:
             db.flush()
         return state
 
-    def _run(self, initial: bool) -> None:
+    def _plan(self, state: SyncState, today: date) -> tuple[date, date, bool]:
+        if state.backfill_status != "completed":
+            initial_start = state.backfill_start_date or (
+                today - timedelta(days=self.settings.initial_sync_days - 1)
+            )
+            state.backfill_start_date = initial_start
+            start = (
+                state.backfill_cursor_date + timedelta(days=1)
+                if state.backfill_cursor_date
+                else initial_start
+            )
+            return start, today, True
+        return today - timedelta(days=self.settings.sync_recent_days - 1), today, False
+
+    def _run(self) -> None:
         try:
             with SessionLocal() as db:
-                has_data = db.scalar(select(func.count()).select_from(Activity)) > 0
                 state = self._state(db)
-                start = date.today() - timedelta(
-                    days=self.settings.initial_sync_days
-                    if initial or not has_data
-                    else self.settings.sync_recent_days
-                )
-                end = date.today()
+                start, end, is_backfill = self._plan(state, date.today())
+                if is_backfill:
+                    state.backfill_status = "in_progress"
+                    state.backfill_started_at = state.backfill_started_at or datetime.now()
+                    state.progress_total = (end - state.backfill_start_date).days + 1  # type: ignore[operator]
+                    state.progress_current = (start - state.backfill_start_date).days  # type: ignore[operator]
+                else:
+                    state.progress_current = 0
+                    state.progress_total = (end - start).days + 1
                 state.status, state.error_message = "running", None
-                state.progress_current, state.progress_total = 0, (end - start).days + 1
                 db.commit()
-            client = GarminClient(self.settings)
-            client.connect()
-            self._sync_activities(client, start, end)
-            self._sync_days(client, start, end)
-            self._sync_weights(client, start, end)
+            if start <= end:
+                client = GarminClient(self.settings)
+                client.connect()
+                self._sync_activities(client, start, end)
+                self._sync_days(client, start, end, is_backfill)
+                self._sync_weights(client, start, end)
             with SessionLocal() as db:
                 state = self._state(db)
-                state.status, state.last_sync_at, state.last_date_downloaded = (
-                    "idle",
-                    datetime.now(),
-                    end,
-                )
+                state.status = "idle"
+                state.last_sync_at = datetime.now()
+                state.next_retry_at = None
+                state.retry_count = 0
+                if is_backfill:
+                    state.backfill_status = "completed"
+                    state.backfill_completed_at = datetime.now()
                 state.progress_current = state.progress_total
                 db.commit()
         except GarminTokenError:
-            # No reintentamos el token dañado en cada ciclo del scheduler.
-            self._finish_error(TOKEN_ERROR, retry_minutes=360)
+            self._finish_error(TOKEN_ERROR, retry_seconds=6 * 60 * 60)
         except GarminConnectTooManyRequestsError:
-            self._finish_error(
-                "Garmin ha limitado las solicitudes (HTTP 429). "
-                "La sincronización se reintentará más tarde.",
-                retry_minutes=60,
-            )
+            self._finish_error("Garmin ha limitado las solicitudes (HTTP 429).")
+        except GarminConnectConnectionError:
+            self._finish_error("Garmin no está disponible temporalmente.", retry_seconds=15 * 60)
         except Exception as exc:
             logger.exception("Sincronización Garmin falló")
-            self._finish_error(f"Error de sincronización: {type(exc).__name__}")
+            self._finish_error(
+                f"Error de sincronización: {type(exc).__name__}", retry_seconds=15 * 60
+            )
         finally:
-            self._lock.release()
+            if self._lock.locked():
+                self._lock.release()
 
-    def _finish_error(self, message: str, retry_minutes: int | None = None) -> None:
+    def _finish_error(self, message: str, retry_seconds: int | None = None) -> None:
         with SessionLocal() as db:
             state = self._state(db)
+            if retry_seconds is None:
+                state.retry_count += 1
+                retry_seconds = min(
+                    self.settings.garmin_retry_base_seconds * (2 ** (state.retry_count - 1)),
+                    8 * 60 * 60,
+                )
             state.status, state.error_message = "error", message
-            state.next_retry_at = (
-                datetime.now() + timedelta(minutes=retry_minutes) if retry_minutes else None
-            )
+            state.next_retry_at = datetime.now() + timedelta(seconds=retry_seconds)
+            if state.backfill_status == "in_progress":
+                state.backfill_status = "incomplete"
             db.commit()
-        logger.warning(message)
+        logger.warning("%s Reintento permitido en %s s.", message, retry_seconds)
 
     def _sync_activities(self, client: GarminClient, start: date, end: date) -> None:
         for data in client.activities(start.isoformat(), end.isoformat()):
@@ -126,60 +152,92 @@ class SyncService:
                 activity_id = str(data.get("activityId"))
                 existing = db.get(Activity, activity_id)
                 details = splits = None
-                if existing is None:  # detalles/splits sólo una vez: evita peticiones repetidas
+                if existing is None:
                     details = client.activity_details(activity_id)
-                    time.sleep(self.settings.garmin_request_delay_seconds)
                     splits = client.activity_splits(activity_id)
                 upsert_activity(db, data, details, splits)
                 db.commit()
-            time.sleep(self.settings.garmin_request_delay_seconds)
 
-    def _sync_days(self, client: GarminClient, start: date, end: date) -> None:
+    def _optional(self, label: str, day: date, operation):  # type: ignore[no-untyped-def]
+        try:
+            return operation()
+        except (GarminConnectTooManyRequestsError, GarminConnectConnectionError):
+            raise
+        except Exception as exc:
+            logger.info("%s no disponible para %s: %s", label, day, type(exc).__name__)
+            return None
+
+    def _sync_days(self, client: GarminClient, start: date, end: date, is_backfill: bool) -> None:
         day = start
         while day <= end:
             with SessionLocal() as db:
                 stats = client.stats(day.isoformat())
                 heart = client.heart_rates(day.isoformat())
-                upsert_daily(db, day, stats, heart)
-                # Estos datos son opcionales en Garmin. Un fallo puntual no detiene el día.
-                for method, sink in ((client.sleep, upsert_sleep), (client.hrv, upsert_hrv)):
-                    try:
-                        data = method(day.isoformat())
-                        if data:
-                            sink(db, day, data)
-                    except GarminConnectTooManyRequestsError:
-                        raise
-                    except Exception as exc:
-                        logger.info(
-                            "Dato opcional no disponible para %s: %s", day, type(exc).__name__
-                        )
-                try:
-                    upsert_training(
-                        db,
+                stress = self._optional("Estrés", day, lambda: client.stress(day.isoformat()))
+                spo2 = self._optional("SpO2", day, lambda: client.spo2(day.isoformat()))
+                respiration = self._optional(
+                    "Respiración", day, lambda: client.respiration(day.isoformat())
+                )
+                battery = self._optional(
+                    "Body Battery",
+                    day,
+                    lambda: client.body_battery(day.isoformat(), day.isoformat()),
+                )
+                upsert_daily(db, day, stats, heart, stress, spo2, respiration, battery)
+                sleep = self._optional("Sueño", day, lambda: client.sleep(day.isoformat()))
+                if sleep:
+                    upsert_sleep(db, day, sleep)
+                hrv = self._optional("HRV", day, lambda: client.hrv(day.isoformat()))
+                if hrv:
+                    upsert_hrv(db, day, hrv)
+                status = (
+                    self._optional(
+                        "Estado de entrenamiento",
                         day,
-                        client.training_status(day.isoformat()),
-                        client.training_readiness(day.isoformat()),
+                        lambda: client.training_status(day.isoformat()),
                     )
-                except GarminConnectTooManyRequestsError:
-                    raise
-                except Exception:
-                    pass
+                    or {}
+                )
+                readiness = (
+                    self._optional(
+                        "Training readiness",
+                        day,
+                        lambda: client.training_readiness(day.isoformat()),
+                    )
+                    or []
+                )
+                endurance = (
+                    self._optional(
+                        "Endurance score", day, lambda: client.endurance_score(day.isoformat())
+                    )
+                    or {}
+                )
+                hill = (
+                    self._optional("Hill score", day, lambda: client.hill_score(day.isoformat()))
+                    or {}
+                )
+                upsert_training(db, day, status, readiness, endurance, hill)
                 state = self._state(db)
-                state.progress_current, state.last_date_downloaded = (day - start).days + 1, day
+                state.last_date_downloaded = day
+                state.progress_current = (
+                    (day - state.backfill_start_date).days + 1
+                    if is_backfill and state.backfill_start_date
+                    else (day - start).days + 1
+                )
+                if is_backfill:
+                    state.backfill_cursor_date = day
                 db.commit()
-            time.sleep(self.settings.garmin_request_delay_seconds)
             day += timedelta(days=1)
 
     def _sync_weights(self, client: GarminClient, start: date, end: date) -> None:
-        try:
-            payload = client.weigh_ins(start.isoformat(), end.isoformat())
-            with SessionLocal() as db:
-                upsert_weights(db, payload)
-                db.commit()
-        except GarminConnectTooManyRequestsError:
-            raise
-        except Exception as exc:
-            logger.info("Pesos no disponibles: %s", type(exc).__name__)
+        payload = self._optional(
+            "Pesos", start, lambda: client.weigh_ins(start.isoformat(), end.isoformat())
+        )
+        if not payload:
+            return
+        with SessionLocal() as db:
+            upsert_weights(db, payload)
+            db.commit()
 
 
 sync_service = SyncService()

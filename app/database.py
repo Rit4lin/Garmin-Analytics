@@ -1,9 +1,11 @@
 from collections.abc import Generator
 
-from sqlalchemy import event
+from alembic.config import Config
+from sqlalchemy import event, inspect
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
+from alembic import command
 from app.config import get_settings
 
 
@@ -31,9 +33,15 @@ def _sqlite_pragmas(dbapi_connection, _connection_record):  # type: ignore[no-un
 
 
 def init_database() -> None:
-    from app.models import all_models  # noqa: F401
-
-    Base.metadata.create_all(bind=engine)
+    """Aplica migraciones y adopta sin pérdida las DB de la versión create_all."""
+    config = Config("alembic.ini")
+    config.set_main_option("sqlalchemy.url", get_settings().database_url)
+    tables = set(inspect(engine).get_table_names())
+    # La primera versión publicada creaba tablas directamente y no tenía revisión.
+    # Se marca como 0001 para que la migración incremental siguiente sea segura.
+    if "alembic_version" not in tables and {"sync_state", "activities"}.issubset(tables):
+        command.stamp(config, "0001_initial")
+    command.upgrade(config, "head")
 
 
 def get_db() -> Generator[Session]:

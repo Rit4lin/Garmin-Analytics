@@ -260,6 +260,11 @@ def sync_status() -> dict[str, object]:
 
 @router.post("/sync", status_code=202)
 def start_sync() -> dict[str, object]:
-    if not sync_service.request_sync(force=True):
-        return {"started": False, "message": "Ya hay una sincronización en curso."}
+    if not sync_service.request_sync():
+        state = sync_service.status()
+        remaining = state.get("cooldown_seconds", 0)
+        message = "Ya hay una sincronización en curso."
+        if isinstance(remaining, int) and remaining > 0:
+            message = f"Sincronización disponible dentro de {remaining} segundos."
+        return {"started": False, "message": message, "cooldown_seconds": remaining}
     return {"started": True, "message": "Sincronización iniciada en segundo plano."}

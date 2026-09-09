@@ -14,9 +14,9 @@ Usa Python 3.13, uv, FastAPI, SQLAlchemy 2.x, Alembic, APScheduler, Jinja2, Plot
 
 En una base vacía, el backfill de `INITIAL_SYNC_DAYS` se inicia en segundo plano; el dashboard continúa disponible. Después sólo se revisan los últimos siete días y las actividades del intervalo, cada `SYNC_INTERVAL_MINUTES`. Las escrituras son UPSERT: repetir una sincronización no duplica datos. El estado, progreso, última fecha y errores están visibles en la interfaz y en `/api/sync/status`.
 
-Se consultan exclusivamente métodos existentes de `python-garminconnect`: actividades, detalles y splits; estadísticas, pulso, sueño, HRV, estado/readiness de entrenamiento y pesos. Algunas métricas (SpO2, Body Battery, estrés, composición, training load, etc.) dependen de la cuenta/dispositivo y se muestran sólo si están disponibles. Los detalles/splits de una actividad nueva se guardan una vez para limitar peticiones.
+Se consultan exclusivamente métodos existentes de `python-garminconnect`: actividades, detalles y splits; estadísticas, pulso, estrés, SpO2, respiración, Body Battery, sueño, HRV, estado/readiness de entrenamiento, endurance/hill score y pesos. Algunas métricas dependen de la cuenta/dispositivo y se muestran sólo si están disponibles. Los detalles/splits de una actividad nueva se guardan una vez para limitar peticiones.
 
-El sincronizador limita las peticiones y detiene la ráfaga ante `GarminConnectTooManyRequestsError` (HTTP 429), dejando un reintento diferido. Los datos opcionales que Garmin no entregue no bloquean el resto. Nunca utiliza `GARMIN_EMAIL` ni `GARMIN_PASSWORD`.
+El backfill se ejecuta una sola vez y guarda un cursor persistente tras cada día completo. Si se interrumpe, continúa desde el día siguiente al cursor; después de completarse, los reinicios sólo revisan los últimos siete días. Todas las llamadas Garmin pasan por un limitador central de `GARMIN_REQUEST_DELAY_SECONDS` (0,8 segundos por defecto). Un HTTP 429 aplica backoff exponencial y bloquea también el botón manual hasta `next_retry_at`; el estado devuelve los segundos restantes. Los datos opcionales que Garmin no entregue no bloquean el resto. Nunca utiliza `GARMIN_EMAIL` ni `GARMIN_PASSWORD`.
 
 ## Instalación local
 
@@ -59,6 +59,7 @@ Variables:
 | `DATABASE_URL` | `sqlite:////data/garmin-analytics.db` |
 | `INITIAL_SYNC_DAYS` | `365` |
 | `SYNC_INTERVAL_MINUTES` | `180` |
+| `GARMIN_REQUEST_DELAY_SECONDS` | `0.8` |
 | `TZ` | `Europe/Madrid` |
 
 No añadas `GARMIN_EMAIL` ni `GARMIN_PASSWORD`. El segundo volumen comparte, sin copiar, los tokens con `garmin-mcp`. No borres ni recrees el directorio de tokens: si están caducados o revocados, Garmin Analytics mostrará: “Los tokens de Garmin no son válidos. Ejecuta garmin-mcp-auth en el contenedor garmin-mcp.” Ejecuta ese comando allí y vuelve a sincronizar.

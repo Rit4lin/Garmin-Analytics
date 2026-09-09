@@ -13,22 +13,21 @@ from app.routers.api import router as api_router
 from app.services.sync_service import sync_service
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-scheduler = BackgroundScheduler(timezone=get_settings().tz)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_database()
+    scheduler = BackgroundScheduler(timezone=get_settings().tz)
     scheduler.add_job(
         sync_service.request_sync,
         "interval",
         minutes=get_settings().sync_interval_minutes,
         id="garmin-sync",
         replace_existing=True,
-        kwargs={"initial": False},
     )
     scheduler.start()
-    sync_service.request_sync(initial=True)
+    sync_service.request_sync()
     yield
     scheduler.shutdown(wait=False)
 

@@ -14,9 +14,35 @@ def first(data: dict[str, Any], *names: str) -> Any:
 
 
 def epoch_datetime(value: Any) -> datetime | None:
-    if not isinstance(value, (int, float)):
-        return None
-    return datetime.fromtimestamp(value / 1000 if value > 100_000_000_000 else value)
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value / 1000 if value > 100_000_000_000 else value)
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None
+
+
+def body_battery_extremes(
+    payload: list[dict[str, Any]] | None,
+) -> tuple[float | None, float | None]:
+    """Extrae valores 0-100 de las series devueltas por get_body_battery()."""
+    values: list[float] = []
+
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            for child in value.values():
+                visit(child)
+        elif isinstance(value, list):
+            if len(value) == 2 and isinstance(value[1], (int, float)) and 0 <= value[1] <= 100:
+                values.append(float(value[1]))
+            else:
+                for child in value:
+                    visit(child)
+
+    visit(payload or [])
+    return (max(values), min(values)) if values else (None, None)
 
 
 def upsert_daily(
@@ -27,6 +53,7 @@ def upsert_daily(
     stress: dict[str, Any] | None = None,
     spo2: dict[str, Any] | None = None,
     respiration: dict[str, Any] | None = None,
+    body_battery: list[dict[str, Any]] | None = None,
 ) -> None:
     row = db.get(DailyStat, day) or DailyStat(stat_date=day, raw_json={})
     row.steps = first(stats, "totalSteps", "steps")
@@ -41,12 +68,18 @@ def upsert_daily(
     row.respiration_avg = first(
         respiration or {}, "avgWakingRespirationValue", "avgRespirationValue"
     )
+    high, low = body_battery_extremes(body_battery)
+    stats_high = first(stats, "bodyBatteryHighestValue")
+    stats_low = first(stats, "bodyBatteryLowestValue")
+    row.body_battery_high = stats_high if stats_high is not None else high
+    row.body_battery_low = stats_low if stats_low is not None else low
     row.raw_json = {
         "stats": stats,
         "heart": heart or {},
         "stress": stress or {},
         "spo2": spo2 or {},
         "respiration": respiration or {},
+        "body_battery": body_battery or [],
     }
     db.add(row)
 
@@ -84,16 +117,29 @@ def upsert_hrv(db: Session, day: date, data: dict[str, Any]) -> None:
 
 
 def upsert_training(
-    db: Session, day: date, status: dict[str, Any], readiness: list[dict[str, Any]]
+    db: Session,
+    day: date,
+    status: dict[str, Any],
+    readiness: list[dict[str, Any]],
+    endurance: dict[str, Any] | None = None,
+    hill: dict[str, Any] | None = None,
 ) -> None:
     row = db.get(TrainingMetric, day) or TrainingMetric(metric_date=day, raw_json={})
     row.vo2max = first(status, "vo2Max")
     row.training_load = first(status, "trainingLoad")
     row.acute_load = first(status, "acuteTrainingLoad")
     row.training_status = first(status, "trainingStatus")
+    row.recovery_time_hours = first(status, "recoveryTime", "recoveryTimeInHours")
     if readiness:
         row.readiness = first(readiness[0], "score", "trainingReadinessScore")
-    row.raw_json = {"status": status, "readiness": readiness}
+    row.endurance_score = first(endurance or {}, "enduranceScore")
+    row.hill_score = first(hill or {}, "hillScore")
+    row.raw_json = {
+        "status": status,
+        "readiness": readiness,
+        "endurance": endurance or {},
+        "hill": hill or {},
+    }
     db.add(row)
 
 

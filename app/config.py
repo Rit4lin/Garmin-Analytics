@@ -13,7 +13,8 @@ class Settings(BaseSettings):
     sync_interval_minutes: int = 180
     tz: str = "Europe/Madrid"
     sync_recent_days: int = 7
-    garmin_request_delay_seconds: float = 0.35
+    garmin_request_delay_seconds: float = 0.8
+    garmin_retry_base_seconds: int = 60
 
     @property
     def token_file(self) -> Path:
