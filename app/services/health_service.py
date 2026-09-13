@@ -45,6 +45,25 @@ def body_battery_extremes(
     return (max(values), min(values)) if values else (None, None)
 
 
+def normalize_sleep_score(summary: dict[str, Any]) -> float | None:
+    """Normaliza los formatos conocidos del sleep score de Garmin a un número."""
+    sleep_scores = first(summary, "sleepScores")
+    candidate: Any = first(summary, "overallScore")
+
+    if isinstance(sleep_scores, dict):
+        overall = first(sleep_scores, "overall", "overallScore")
+        if isinstance(overall, dict):
+            candidate = overall.get("value")
+        elif overall is not None:
+            candidate = overall
+    elif sleep_scores is not None:
+        candidate = sleep_scores
+
+    if isinstance(candidate, bool) or not isinstance(candidate, (int, float)):
+        return None
+    return float(candidate)
+
+
 def upsert_daily(
     db: Session,
     day: date,
@@ -92,11 +111,7 @@ def upsert_sleep(db: Session, day: date, data: dict[str, Any]) -> None:
     )
     row.end_time = epoch_datetime(first(summary, "sleepEndTimestampGMT", "sleepEndTimestampLocal"))
     row.duration_seconds = first(summary, "sleepTimeSeconds", "sleepDurationInSeconds")
-    row.score = (
-        first(summary, "sleepScores", "overallScore")
-        if not isinstance(first(summary, "sleepScores"), dict)
-        else first(first(summary, "sleepScores"), "overall", "overallScore")
-    )
+    row.score = normalize_sleep_score(summary)
     row.deep_seconds = first(summary, "deepSleepSeconds")
     row.light_seconds = first(summary, "lightSleepSeconds")
     row.rem_seconds = first(summary, "remSleepSeconds")

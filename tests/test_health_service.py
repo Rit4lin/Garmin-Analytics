@@ -4,8 +4,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.database import Base
-from app.models.all_models import DailyStat, TrainingMetric, Weight
-from app.services.health_service import upsert_daily, upsert_training, upsert_weights
+from app.models.all_models import DailyStat, Sleep, TrainingMetric, Weight
+from app.services.health_service import upsert_daily, upsert_sleep, upsert_training, upsert_weights
 
 
 def test_daily_optional_metrics_and_training_are_persisted() -> None:
@@ -41,6 +41,45 @@ def test_daily_optional_metrics_and_training_are_persisted() -> None:
         7000,
         55,
     )
+
+
+def test_sleep_score_accepts_nested_overall_value() -> None:
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    day = datetime(2026, 1, 7).date()
+    payload = {
+        "dailySleepDTO": {
+            "sleepScores": {
+                "overall": {"value": 82, "qualifierKey": "GOOD"},
+            }
+        }
+    }
+    with Session(engine) as db:
+        upsert_sleep(db, day, payload)
+        db.commit()
+        row = db.get(Sleep, day)
+    assert row is not None
+    assert row.score == 82
+
+
+def test_sleep_score_keeps_legacy_numeric_formats_and_rejects_non_numeric() -> None:
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        day_one = datetime(2026, 1, 8).date()
+        day_two = datetime(2026, 1, 9).date()
+        day_three = datetime(2026, 1, 10).date()
+        upsert_sleep(db, day_one, {"dailySleepDTO": {"sleepScores": {"overall": 77}}})
+        upsert_sleep(db, day_two, {"dailySleepDTO": {"overallScore": 74}})
+        upsert_sleep(
+            db,
+            day_three,
+            {"dailySleepDTO": {"sleepScores": {"overall": {"value": "unknown"}}}},
+        )
+        db.commit()
+        assert db.get(Sleep, day_one).score == 77
+        assert db.get(Sleep, day_two).score == 74
+        assert db.get(Sleep, day_three).score is None
 
 
 def test_weight_accepts_iso_calendar_date() -> None:
