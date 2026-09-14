@@ -1,16 +1,106 @@
 <!doctype html>
 <html lang="es">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Garmin Analytics</title><link rel="stylesheet" href="/static/style.css">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Garmin Analytics 2.0</title>
+  <link rel="stylesheet" href="/static/style.css">
   <script src="/static/plotly.min.js"></script>
 </head>
 <body>
-<header><div><p class="eyebrow">ANÁLISIS PERSONAL</p><h1>GARMIN ANALYTICS</h1></div><button id="sync">Sincronizar ahora</button></header>
+<header>
+  <div>
+    <div class="title-row">
+      <p class="eyebrow">ANÁLISIS PERSONAL</p>
+      <span class="version">v2.0.0</span>
+    </div>
+    <h1>GARMIN ANALYTICS</h1>
+    <p class="subtitle">Forma, fatiga, recuperación y rendimiento contra tu propia línea base.</p>
+  </div>
+  <button id="sync">Sincronizar ahora</button>
+</header>
 <main>
-  <section class="toolbar"><div id="ranges" role="group" aria-label="Periodo"><button data-days="7">7 días</button><button class="active" data-days="30">30 días</button><button data-days="90">90 días</button><button data-days="180">6 meses</button><button data-days="270">9 meses</button><button data-days="365">1 año</button><button data-days="3650">Todo</button></div><p id="sync-status">Cargando estado…</p></section>
+  <section class="toolbar">
+    <div id="ranges" role="group" aria-label="Periodo">
+      <button data-days="7">7 días</button>
+      <button class="active" data-days="30">30 días</button>
+      <button data-days="90">90 días</button>
+      <button data-days="180">6 meses</button>
+      <button data-days="270">9 meses</button>
+      <button data-days="365">1 año</button>
+      <button data-days="3650">Todo</button>
+    </div>
+    <p id="sync-status">Cargando estado…</p>
+  </section>
+
+  <section id="performance-hero" class="performance-hero">
+    <div>
+      <p class="eyebrow">ESTADO DE RENDIMIENTO</p>
+      <h2 id="performance-headline">Calculando tendencia…</h2>
+      <p id="performance-detail" class="muted">Comparando tu periodo reciente con tu línea base personal.</p>
+    </div>
+    <span id="performance-badge" class="status-pill">—</span>
+  </section>
+
+  <section id="trend-cards" class="trend-cards"></section>
   <section id="cards" class="cards"></section>
-  <section class="charts"><article><h2>Actividad semanal</h2><div id="activity-chart"></div></article><article><h2>Pasos diarios</h2><div id="steps-chart"></div></article><article><h2>Rendimiento</h2><div id="performance-chart"></div></article><article><h2>Sueño y HRV</h2><div id="recovery-chart"></div></article></section>
-  <section class="table-section"><div class="heading"><h2>Entrenamientos</h2><select id="type"><option value="">Todos los tipos</option></select></div><div class="table-wrap"><table><thead><tr><th>Fecha</th><th>Actividad</th><th>Tipo</th><th>Distancia</th><th>Duración</th><th>Ritmo</th><th>FC</th></tr></thead><tbody id="activities"></tbody></table></div></section>
-</main><template id="card"><article class="card"><p></p><strong></strong></article></template><script src="/static/dashboard.js"></script>
-</body></html>
+
+  <section class="analysis-grid">
+    <article>
+      <div class="section-heading"><h2>Insights</h2><span>Qué está cambiando</span></div>
+      <div id="insights" class="insight-list"></div>
+    </article>
+    <article>
+      <div class="section-heading"><h2>Alertas de tendencia</h2><span>Señales a vigilar</span></div>
+      <div id="alerts" class="alert-list"></div>
+    </article>
+  </section>
+
+  <section class="charts">
+    <article><h2>Actividad semanal</h2><div id="activity-chart"></div></article>
+    <article><h2>Forma y carga</h2><div id="performance-chart"></div></article>
+    <article><h2>Recuperación</h2><div id="recovery-chart"></div></article>
+    <article><h2>Readiness y carga aguda</h2><div id="readiness-chart"></div></article>
+    <article><h2>Predicción de carrera</h2><div id="race-chart"></div></article>
+    <article><h2>Umbral y Running Tolerance</h2><div id="threshold-chart"></div></article>
+  </section>
+
+  <section class="analysis-grid lower-grid">
+    <article>
+      <div class="section-heading"><h2>Por disciplina</h2><span>Tendencia separada por tipo de trabajo</span></div>
+      <div id="disciplines"></div>
+    </article>
+    <article>
+      <div class="section-heading"><h2>Carrera</h2><span>Predicciones, umbral y récords</span></div>
+      <div id="race-summary"></div>
+    </article>
+  </section>
+
+  <section class="table-section">
+    <div class="heading">
+      <div><h2>Entrenamientos</h2><p class="muted">Pulsa una sesión para compararla con entrenamientos similares.</p></div>
+      <select id="type"><option value="">Todos los tipos</option></select>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha</th><th>Actividad</th><th>Tipo</th><th>Distancia</th>
+            <th>Duración</th><th>Ritmo</th><th>FC</th><th>Eficiencia</th>
+          </tr>
+        </thead>
+        <tbody id="activities"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<dialog id="activity-dialog">
+  <div class="dialog-heading"><h2>Análisis de sesión</h2><button id="dialog-close">Cerrar</button></div>
+  <div id="activity-detail"></div>
+</dialog>
+
+<template id="card"><article class="card"><p></p><strong></strong></article></template>
+<script src="/static/dashboard.js"></script>
+</body>
+</html>
