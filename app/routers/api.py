@@ -5,13 +5,28 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.all_models import Activity, DailyStat, Hrv, Sleep, TrainingMetric, Weight
+from app.models.all_models import (
+    Activity,
+    DailyStat,
+    Hrv,
+    PerformanceMetric,
+    Sleep,
+    TrainingMetric,
+    Weight,
+)
 from app.services.analytics_service import (
     format_duration,
     format_pace,
     moving_average,
     seconds_per_km,
     weekly_totals,
+)
+from app.services.performance_service import (
+    activity_efficiency,
+    aerobic_decoupling,
+    build_performance_report,
+    performance_timeseries,
+    similar_activity_comparison,
 )
 from app.services.sync_service import sync_service
 
@@ -25,7 +40,11 @@ def start_for(days: int) -> date:
 
 
 def activity_payload(row: Activity) -> dict[str, object]:
-    pace = seconds_per_km(row.distance_meters, row.moving_duration_seconds or row.duration_seconds)
+    pace = seconds_per_km(
+        row.distance_meters,
+        row.moving_duration_seconds or row.duration_seconds,
+    )
+    efficiency = activity_efficiency(row)
     return {
         "id": row.activity_id,
         "date": row.start_time.isoformat(),
@@ -42,6 +61,7 @@ def activity_payload(row: Activity) -> dict[str, object]:
         "max_hr": row.max_hr,
         "training_load": row.training_load,
         "aerobic_te": row.aerobic_te,
+        "efficiency": round(efficiency, 2) if efficiency is not None else None,
     }
 
 
@@ -107,6 +127,13 @@ def summary(
             "training_load": next(
                 (x.training_load for x in reversed(training) if x.training_load is not None), None
             ),
+            "readiness": next(
+                (x.readiness for x in reversed(training) if x.readiness is not None), None
+            ),
+            "endurance_score": next(
+                (x.endurance_score for x in reversed(training) if x.endurance_score is not None),
+                None,
+            ),
         },
         "weekly": weekly,
         "daily": daily,
@@ -124,7 +151,12 @@ def summary(
                 "date": x.metric_date.isoformat(),
                 "vo2max": x.vo2max,
                 "load": x.training_load,
+                "acute_load": x.acute_load,
                 "readiness": x.readiness,
+                "recovery_hours": x.recovery_time_hours,
+                "endurance_score": x.endurance_score,
+                "hill_score": x.hill_score,
+                "status": x.training_status,
             }
             for x in training
         ],
@@ -159,6 +191,12 @@ def activity(activity_id: str, db: Session = Depends(get_db)) -> dict[str, objec
     row = db.get(Activity, activity_id)
     if not row:
         raise HTTPException(404, "Actividad no encontrada")
+    candidate_query = select(Activity).where(
+        Activity.start_time >= row.start_time - timedelta(days=365)
+    )
+    if row.activity_type is not None:
+        candidate_query = candidate_query.where(Activity.activity_type == row.activity_type)
+    candidates = list(db.scalars(candidate_query.order_by(Activity.start_time)))
     return {
         **activity_payload(row),
         "elevation_gain": row.elevation_gain,
@@ -166,6 +204,8 @@ def activity(activity_id: str, db: Session = Depends(get_db)) -> dict[str, objec
         "cadence": row.avg_cadence,
         "power": row.avg_power,
         "anaerobic_te": row.anaerobic_te,
+        "aerobic_decoupling": aerobic_decoupling(row.splits_json),
+        "comparison": similar_activity_comparison(row, candidates),
         "raw_details": row.details_json,
         "splits": row.splits_json,
     }
@@ -182,6 +222,7 @@ def health(
             "resting_hr": x.resting_hr,
             "stress": x.stress_avg,
             "body_battery": x.body_battery_high,
+            "body_battery_low": x.body_battery_low,
             "spo2": x.spo2_avg,
             "respiration": x.respiration_avg,
         }
@@ -205,6 +246,7 @@ def sleep(
             "deep": x.deep_seconds,
             "light": x.light_seconds,
             "rem": x.rem_seconds,
+            "awake": x.awake_seconds,
         }
         for x in db.scalars(
             select(Sleep).where(Sleep.sleep_date >= start_for(days)).order_by(Sleep.sleep_date)
@@ -224,6 +266,9 @@ def training(
             "acute_load": x.acute_load,
             "status": x.training_status,
             "readiness": x.readiness,
+            "recovery_time_hours": x.recovery_time_hours,
+            "endurance_score": x.endurance_score,
+            "hill_score": x.hill_score,
         }
         for x in db.scalars(
             select(TrainingMetric)
@@ -249,6 +294,44 @@ def weight(
         }
         for x in db.scalars(
             select(Weight).where(Weight.recorded_at >= since).order_by(Weight.recorded_at)
+        )
+    ]
+
+
+@router.get("/performance")
+def performance(
+    days: int = Query(180, ge=30, le=3650), db: Session = Depends(get_db)
+) -> dict[str, object]:
+    return build_performance_report(db, days)
+
+
+@router.get("/performance/timeseries")
+def performance_history(
+    days: int = Query(365, ge=30, le=3650), db: Session = Depends(get_db)
+) -> dict[str, object]:
+    return performance_timeseries(db, days)
+
+
+@router.get("/performance/raw")
+def performance_raw(
+    days: int = Query(365, ge=1, le=3650), db: Session = Depends(get_db)
+) -> list[dict[str, object]]:
+    return [
+        {
+            "date": row.metric_date.isoformat(),
+            "race_5k_seconds": row.race_5k_seconds,
+            "race_10k_seconds": row.race_10k_seconds,
+            "race_half_seconds": row.race_half_seconds,
+            "race_marathon_seconds": row.race_marathon_seconds,
+            "lactate_hr": row.lactate_hr,
+            "lactate_speed_mps": row.lactate_speed_mps,
+            "running_tolerance": row.running_tolerance,
+            "fitness_age": row.fitness_age,
+        }
+        for row in db.scalars(
+            select(PerformanceMetric)
+            .where(PerformanceMetric.metric_date >= start_for(days))
+            .order_by(PerformanceMetric.metric_date)
         )
     ]
 
