@@ -12,7 +12,10 @@ from app.database import init_database
 from app.routers.api import router as api_router
 from app.services.sync_service import sync_service
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 
 @asynccontextmanager
@@ -32,7 +35,7 @@ async def lifespan(_app: FastAPI):
     scheduler.shutdown(wait=False)
 
 
-app = FastAPI(title="Garmin Analytics", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Garmin Analytics", version="2.0.0", lifespan=lifespan)
 app.include_router(api_router)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")

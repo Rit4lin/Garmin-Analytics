@@ -120,3 +120,34 @@ class GarminClient:
 
     def weigh_ins(self, start: str, end: str) -> dict[str, Any]:
         return self._api_call(lambda client: client.get_weigh_ins(start, end))
+
+    def race_predictions(self, start: str | None = None, end: str | None = None) -> Any:
+        if start and end:
+            return self._api_call(
+                lambda client: client.get_race_predictions(start, end, "daily")
+            )
+        return self._api_call(lambda client: client.get_race_predictions())
+
+    def lactate_threshold(self) -> Any:
+        return self._api_call(lambda client: client.get_lactate_threshold())
+
+    def lactate_threshold_history(self, start: str, end: str) -> Any:
+        return self._api_call(
+            lambda client: client.get_lactate_threshold(
+                latest=False,
+                start_date=start,
+                end_date=end,
+                aggregation="daily",
+            )
+        )
+
+    def running_tolerance(self, start: str, end: str) -> Any:
+        return self._api_call(
+            lambda client: client.get_running_tolerance(start, end, "daily")
+        )
+
+    def fitness_age(self, day: str) -> Any:
+        return self._api_call(lambda client: client.get_fitnessage_data(day))
+
+    def personal_records(self) -> Any:
+        return self._api_call(lambda client: client.get_personal_record())

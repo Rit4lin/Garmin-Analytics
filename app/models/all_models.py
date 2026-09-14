@@ -107,6 +107,33 @@ class TrainingMetric(Base):
     raw_json: Mapped[dict[str, Any]] = mapped_column(JSON)
 
 
+class PerformanceMetric(Base):
+    __tablename__ = "performance_metrics"
+
+    metric_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    race_5k_seconds: Mapped[float | None] = mapped_column(Float)
+    race_10k_seconds: Mapped[float | None] = mapped_column(Float)
+    race_half_seconds: Mapped[float | None] = mapped_column(Float)
+    race_marathon_seconds: Mapped[float | None] = mapped_column(Float)
+    lactate_hr: Mapped[float | None] = mapped_column(Float)
+    lactate_speed_mps: Mapped[float | None] = mapped_column(Float)
+    running_tolerance: Mapped[float | None] = mapped_column(Float)
+    fitness_age: Mapped[float | None] = mapped_column(Float)
+    raw_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+
+
+class PersonalRecord(Base):
+    __tablename__ = "personal_records"
+
+    record_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    record_type: Mapped[str] = mapped_column(String(100), index=True)
+    value: Mapped[float | None] = mapped_column(Float)
+    unit: Mapped[str | None] = mapped_column(String(40))
+    record_date: Mapped[date | None] = mapped_column(Date)
+    activity_id: Mapped[str | None] = mapped_column(String(64))
+    raw_json: Mapped[dict[str, Any]] = mapped_column(JSON)
+
+
 class SyncState(Base):
     __tablename__ = "sync_state"
     name: Mapped[str] = mapped_column(String(40), primary_key=True, default="garmin")
