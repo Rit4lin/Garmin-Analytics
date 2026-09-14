@@ -17,16 +17,18 @@ def test_existing_database_is_adopted_and_migrated(tmp_path, monkeypatch) -> Non
         connection.execute(
             text("CREATE TABLE sync_state (name VARCHAR(40) PRIMARY KEY, status VARCHAR(30))")
         )
-        connection.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)"))
+        connection.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(64) NOT NULL)"))
     monkeypatch.setattr(database, "engine", engine)
     monkeypatch.setattr(database, "get_settings", lambda: Settings(database_url=url))
     database.init_database()
     columns = {column["name"] for column in inspect(engine).get_columns("sync_state")}
+    tables = set(inspect(engine).get_table_names())
     assert {"backfill_status", "backfill_cursor_date", "retry_count"}.issubset(columns)
+    assert {"performance_metrics", "personal_records"}.issubset(tables)
     with engine.connect() as connection:
         assert (
             connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
-            == "0003_backfill_nested_training_metrics"
+            == "0004_performance_analytics_v2"
         )
 
 
