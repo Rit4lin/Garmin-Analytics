@@ -17,6 +17,11 @@ from app.services.health_service import (
     upsert_training,
     upsert_weights,
 )
+from app.services.performance_service import (
+    upsert_performance_metric,
+    upsert_performance_range,
+    upsert_personal_records,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +108,7 @@ class SyncService:
                 client.connect()
                 self._sync_activities(client, start, end)
                 self._sync_days(client, start, end, is_backfill)
+                self._sync_performance(client, start, end)
                 self._sync_weights(client, start, end)
             with SessionLocal() as db:
                 state = self._state(db)
@@ -228,6 +234,70 @@ class SyncService:
                     state.backfill_cursor_date = day
                 db.commit()
             day += timedelta(days=1)
+
+    @staticmethod
+    def _chunks(start: date, end: date, max_days: int = 365):
+        current = start
+        while current <= end:
+            chunk_end = min(end, current + timedelta(days=max_days - 1))
+            yield current, chunk_end
+            current = chunk_end + timedelta(days=1)
+
+    def _sync_performance(self, client: GarminClient, start: date, end: date) -> None:
+        for chunk_start, chunk_end in self._chunks(start, end):
+            race = self._optional(
+                "Predicciones de carrera",
+                chunk_start,
+                lambda: client.race_predictions(
+                    chunk_start.isoformat(), chunk_end.isoformat()
+                ),
+            )
+            tolerance = self._optional(
+                "Running tolerance",
+                chunk_start,
+                lambda: client.running_tolerance(
+                    chunk_start.isoformat(), chunk_end.isoformat()
+                ),
+            )
+            lactate = self._optional(
+                "Histórico de umbral",
+                chunk_start,
+                lambda: client.lactate_threshold_history(
+                    chunk_start.isoformat(), chunk_end.isoformat()
+                ),
+            )
+            with SessionLocal() as db:
+                upsert_performance_range(
+                    db,
+                    chunk_start,
+                    chunk_end,
+                    race=race,
+                    tolerance=tolerance,
+                    lactate=lactate,
+                )
+                db.commit()
+
+        race_latest = self._optional(
+            "Predicción de carrera actual", end, client.race_predictions
+        )
+        lactate_latest = self._optional(
+            "Umbral actual", end, client.lactate_threshold
+        )
+        fitness_age = self._optional(
+            "Fitness age", end, lambda: client.fitness_age(end.isoformat())
+        )
+        records = self._optional("Récords personales", end, client.personal_records)
+        with SessionLocal() as db:
+            upsert_performance_metric(
+                db,
+                end,
+                race=race_latest,
+                lactate=lactate_latest,
+                fitness_age=fitness_age,
+            )
+            if records:
+                upsert_personal_records(db, records)
+            db.commit()
 
     def _sync_weights(self, client: GarminClient, start: date, end: date) -> None:
         payload = self._optional(
