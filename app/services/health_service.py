@@ -13,6 +13,49 @@ def first(data: dict[str, Any], *names: str) -> Any:
     return None
 
 
+def mapping(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def primary_device(values: Any) -> dict[str, Any]:
+    """Return the primary device payload from Garmin's device-id keyed objects."""
+    devices = [item for item in mapping(values).values() if isinstance(item, dict)]
+    return next(
+        (item for item in devices if item.get("primaryTrainingDevice")),
+        devices[0] if devices else {},
+    )
+
+
+def current_training_values(status: dict[str, Any]) -> dict[str, Any]:
+    """Normalize both legacy and current Garmin training-status response shapes."""
+    vo2 = mapping(mapping(status.get("mostRecentVO2Max")).get("generic"))
+    training_status = primary_device(
+        mapping(status.get("mostRecentTrainingStatus")).get("latestTrainingStatusData")
+    )
+    acute = mapping(training_status.get("acuteTrainingLoadDTO"))
+
+    vo2max = first(status, "vo2Max")
+    training_load = first(status, "trainingLoad")
+    acute_load = first(status, "acuteTrainingLoad")
+    status_value = first(status, "trainingStatus")
+    weekly_load = first(training_status, "weeklyTrainingLoad")
+
+    return {
+        "vo2max": vo2max
+        if vo2max is not None
+        else first(vo2, "vo2MaxValue", "vo2MaxPreciseValue"),
+        "training_load": training_load
+        if training_load is not None
+        else weekly_load if weekly_load is not None else first(acute, "dailyTrainingLoadAcute"),
+        "acute_load": acute_load
+        if acute_load is not None
+        else first(acute, "dailyTrainingLoadAcute"),
+        "training_status": status_value
+        if status_value is not None
+        else first(training_status, "trainingStatusFeedbackPhrase", "trainingStatus"),
+    }
+
+
 def epoch_datetime(value: Any) -> datetime | None:
     if isinstance(value, (int, float)):
         return datetime.fromtimestamp(value / 1000 if value > 100_000_000_000 else value)
@@ -140,10 +183,11 @@ def upsert_training(
     hill: dict[str, Any] | None = None,
 ) -> None:
     row = db.get(TrainingMetric, day) or TrainingMetric(metric_date=day, raw_json={})
-    row.vo2max = first(status, "vo2Max")
-    row.training_load = first(status, "trainingLoad")
-    row.acute_load = first(status, "acuteTrainingLoad")
-    row.training_status = first(status, "trainingStatus")
+    values = current_training_values(status)
+    row.vo2max = values["vo2max"]
+    row.training_load = values["training_load"]
+    row.acute_load = values["acute_load"]
+    row.training_status = values["training_status"]
     row.recovery_time_hours = first(status, "recoveryTime", "recoveryTimeInHours")
     if readiness:
         row.readiness = first(readiness[0], "score", "trainingReadinessScore")

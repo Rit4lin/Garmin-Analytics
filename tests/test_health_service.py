@@ -43,6 +43,35 @@ def test_daily_optional_metrics_and_training_are_persisted() -> None:
     )
 
 
+def test_training_status_accepts_current_nested_garmin_response() -> None:
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    day = datetime(2026, 1, 4).date()
+    payload = {
+        "mostRecentVO2Max": {"generic": {"vo2MaxValue": 48.0}},
+        "mostRecentTrainingStatus": {
+            "latestTrainingStatusData": {
+                "secondary-device": {
+                    "primaryTrainingDevice": False,
+                    "acuteTrainingLoadDTO": {"dailyTrainingLoadAcute": 99},
+                },
+                "primary-device": {
+                    "primaryTrainingDevice": True,
+                    "trainingStatusFeedbackPhrase": "RECOVERY_1",
+                    "acuteTrainingLoadDTO": {"dailyTrainingLoadAcute": 191},
+                },
+            }
+        },
+    }
+    with Session(engine) as db:
+        upsert_training(db, day, payload, [])
+        db.commit()
+        row = db.get(TrainingMetric, day)
+    assert row is not None
+    assert (row.vo2max, row.training_load, row.acute_load) == (48.0, 191, 191)
+    assert row.training_status == "RECOVERY_1"
+
+
 def test_sleep_score_accepts_nested_overall_value() -> None:
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine)
