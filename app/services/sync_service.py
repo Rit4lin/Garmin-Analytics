@@ -278,15 +278,23 @@ class SyncService:
                 db.commit()
 
         race_latest = self._optional(
-            "Predicción de carrera actual", end, client.race_predictions
+            "Predicción de carrera actual",
+            end,
+            lambda: client.race_predictions(),
         )
         lactate_latest = self._optional(
-            "Umbral actual", end, client.lactate_threshold
+            "Umbral actual",
+            end,
+            lambda: client.lactate_threshold(),
         )
         fitness_age = self._optional(
             "Fitness age", end, lambda: client.fitness_age(end.isoformat())
         )
-        records = self._optional("Récords personales", end, client.personal_records)
+        records = self._optional(
+            "Récords personales",
+            end,
+            lambda: client.personal_records(),
+        )
         with SessionLocal() as db:
             upsert_performance_metric(
                 db,
