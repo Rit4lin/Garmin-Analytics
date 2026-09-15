@@ -26,6 +26,41 @@ jobs:
       - run: uv run ruff check .
       - run: uv run pytest
 
+  tag-release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - id: version
+        name: Read project version
+        shell: bash
+        run: |
+          VERSION="$(awk -F'"' '/^version = / {print $2; exit}' pyproject.toml)"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid project version: $VERSION" >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Create version tag when missing
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          TAG="v${VERSION}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "${TAG} already exists; nothing to do."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" "$GITHUB_SHA" -m "Garmin Analytics ${TAG}"
+          git push origin "$TAG"
+
   publish:
     if: github.event_name == 'push'
     needs: test
