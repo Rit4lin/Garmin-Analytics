@@ -1,3 +1,6 @@
+import tomllib
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 from garminconnect import GarminConnectConnectionError
 
@@ -11,6 +14,22 @@ def test_healthz_and_docs_work() -> None:
         assert client.get("/healthz").json() == {"status": "ok"}
         assert client.get("/docs").status_code == 200
         assert client.get("/api/summary?days=0").status_code == 422
+
+
+def test_release_version_is_consistent() -> None:
+    project = tomllib.loads(Path("pyproject.toml").read_text())["project"]
+    assert project["version"] == app.version == "2.0.0"
+
+
+def test_dashboard_surfaces_v2_release_metrics() -> None:
+    with TestClient(app) as client:
+        html = client.get("/").text
+        javascript = client.get("/static/v2-release.js").text
+    assert "/static/v2-release.js" in html
+    assert "fitness_age" in javascript
+    assert "recovery-components" in javascript
+    assert "aerobic_te" in javascript
+    assert "anaerobic_te" in javascript
 
 
 def test_missing_tokens_do_not_break_web() -> None:
