@@ -1,9 +1,14 @@
 from datetime import date, datetime, timedelta
 
-from app.models.all_models import Activity
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+
+from app.database import Base
+from app.models.all_models import Activity, PerformanceMetric
 from app.services.performance_service import (
     activity_efficiency,
     aerobic_decoupling,
+    build_performance_report,
     load_balance,
     normalize_performance_payloads,
     trend,
@@ -106,3 +111,23 @@ def test_normalize_optional_garmin_performance_payloads() -> None:
     assert values["lactate_speed_mps"] == 3.5
     assert values["running_tolerance"] == 48.5
     assert values["fitness_age"] == 29
+
+
+def test_performance_report_exposes_fitness_age_trend() -> None:
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    today = date.today()
+    with Session(engine) as db:
+        for offset in range(56):
+            db.add(
+                PerformanceMetric(
+                    metric_date=today - timedelta(days=55 - offset),
+                    fitness_age=31 if offset < 42 else 29,
+                    raw_json={},
+                )
+            )
+        db.commit()
+        report = build_performance_report(db, 60)
+    fitness_age = report["fitness"]["fitness_age"]
+    assert fitness_age["status"] == "mejorando"
+    assert fitness_age["current"] == 29
