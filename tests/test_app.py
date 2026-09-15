@@ -23,7 +23,9 @@ def test_release_version_is_consistent() -> None:
 
 def test_dashboard_surfaces_v2_release_metrics() -> None:
     with TestClient(app) as client:
-        javascript = client.get("/static/dashboard.js").text
+        html = client.get("/").text
+        javascript = client.get("/static/v2-release.js").text
+    assert "/static/v2-release.js" in html
     assert "fitness_age" in javascript
     assert "recovery-components" in javascript
     assert "aerobic_te" in javascript
